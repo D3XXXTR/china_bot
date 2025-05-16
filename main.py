@@ -55,7 +55,8 @@ async def start(message: Message):
         buttons = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🛍 Оформить заказ", callback_data="start_order")]
         ])
-        await message.answer(text, reply_markup=user_menu, parse_mode="HTML")
+        await message.answer(text, reply_markup=buttons, parse_mode="HTML")
+
 
 
 

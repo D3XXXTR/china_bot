@@ -69,7 +69,8 @@ def register_user_handlers(dp, conn, cursor, bot):
     @router.callback_query(F.data == "start_order")
     async def handle_start_order_callback(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.delete()
-        await handle_main_menu_buttons(callback.message, state)
+        await callback.message.answer("🔗 Пришлите ссылку на товар c aliexpress.ru:", reply_markup=user_menu)
+        await state.set_state(OrderForm.link)
 
     @router.message(OrderForm.link)
     async def get_link(message: Message, state: FSMContext):
