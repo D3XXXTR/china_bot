@@ -32,50 +32,16 @@ def register_user_handlers(dp, conn, cursor, bot):
     router = Router()
     ADMIN_ID = 1174813870
 
-    @router.message(F.text == "🛍 Оформить заказ")
-    async def start_order(message: Message, state: FSMContext):
-        await message.answer("🔗 Пришлите ссылку на товар c aliexpress.ru:", reply_markup=user_menu)
-        await state.set_state(OrderForm.link)
-
-    @router.callback_query(F.data == "start_order")
-    async def handle_start_order_callback(callback: types.CallbackQuery, state: FSMContext):
-        await callback.message.delete()
-        await start_order(callback.message, state)  # повторно вызываем функцию оформления
-
-    @router.message(OrderForm.link)
-    async def get_link(message: Message, state: FSMContext):
-        await state.update_data(link=message.text)
-        await state.set_state(OrderForm.details)
-        await message.answer("📌 Укажите параметры (через пробел, цвет, размер и т.д.):")
-
-    @router.message(OrderForm.details)
-    async def get_details(message: Message, state: FSMContext):
-        await state.update_data(details=message.text)
-        await state.set_state(OrderForm.quantity)
-        await message.answer("🔢 Сколько штук:")
-
-    @router.message(OrderForm.quantity)
-    async def get_quantity(message: Message, state: FSMContext):
-        await state.update_data(quantity=message.text)
-        data = await state.get_data()
-        code = generate_order_code()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        cursor.execute("INSERT INTO orders (code, link, details, quantity, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                       (code, data['link'], data['details'], data['quantity'], message.from_user.id, now))
-        conn.commit()
-        await message.answer(f"✅ Заказ оформлен и находится в обработке!\n💰Стоимость заказа будет направлена позже. Ожидайте... \n🆔 Код заказа: <code>{code}</code>", parse_mode="HTML", reply_markup=user_menu)
-        await state.clear()
-
-    @router.message(F.text.in_(["📦 Мои заказы", "📞 Поддержка"]))
-    async def handle_common_buttons(message: Message, state: FSMContext):
+    @router.message(F.text.in_(["📦 Мои заказы", "📞 Поддержка", "💳 Оплата", "🛍 Оформить заказ"]))
+    async def handle_main_menu_buttons(message: Message, state: FSMContext):
         await state.clear()
         if message.text == "📞 Поддержка":
-            await message.answer("📞 Напишите в поддержку: @dekkstr")
+            await message.answer("📞 Напишите в поддержку: @dekkstr", reply_markup=user_menu)
         elif message.text == "📦 Мои заказы":
             cursor.execute("SELECT code, link, details, quantity, status, created_at, amount FROM orders WHERE user_id = ?", (message.from_user.id,))
             rows = cursor.fetchall()
             if not rows:
-                return await message.answer("У вас пока нет заказов.")
+                return await message.answer("У вас пока нет заказов.", reply_markup=user_menu)
             for i, row in enumerate(rows, 1):
                 code, link, details, quantity, status, created_at, amount = row
                 product_link = f'<a href="{link}">Товар {i}</a>' if link.startswith("http") else f"Товар {i}"
@@ -93,11 +59,41 @@ def register_user_handlers(dp, conn, cursor, bot):
                      InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_{code}")]
                 ])
                 await message.answer(text, reply_markup=buttons, parse_mode="HTML", disable_web_page_preview=True)
+        elif message.text == "💳 Оплата":
+            await state.set_state(PaymentForm.waiting_amount)
+            await message.answer("Введите сумму к оплате (например: 1234.56):", reply_markup=user_menu)
+        elif message.text == "🛍 Оформить заказ":
+            await message.answer("🔗 Пришлите ссылку на товар c aliexpress.ru:", reply_markup=user_menu)
+            await state.set_state(OrderForm.link)
 
-    @router.message(F.text == "💳 Оплата")
-    async def ask_payment_amount(message: Message, state: FSMContext):
-        await state.set_state(PaymentForm.waiting_amount)
-        await message.answer("Введите сумму к оплате (например: 1234.56):")
+    @router.callback_query(F.data == "start_order")
+    async def handle_start_order_callback(callback: types.CallbackQuery, state: FSMContext):
+        await callback.message.delete()
+        await handle_main_menu_buttons(callback.message, state)
+
+    @router.message(OrderForm.link)
+    async def get_link(message: Message, state: FSMContext):
+        await state.update_data(link=message.text)
+        await state.set_state(OrderForm.details)
+        await message.answer("📌 Укажите параметры (через пробел, цвет, размер и т.д.):", reply_markup=user_menu)
+
+    @router.message(OrderForm.details)
+    async def get_details(message: Message, state: FSMContext):
+        await state.update_data(details=message.text)
+        await state.set_state(OrderForm.quantity)
+        await message.answer("🔢 Сколько штук:", reply_markup=user_menu)
+
+    @router.message(OrderForm.quantity)
+    async def get_quantity(message: Message, state: FSMContext):
+        await state.update_data(quantity=message.text)
+        data = await state.get_data()
+        code = generate_order_code()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cursor.execute("INSERT INTO orders (code, link, details, quantity, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                       (code, data['link'], data['details'], data['quantity'], message.from_user.id, now))
+        conn.commit()
+        await message.answer(f"✅ Заказ оформлен и находится в обработке!\n💰Стоимость заказа будет направлена позже. Ожидайте... \n🆔 Код заказа: <code>{code}</code>", parse_mode="HTML", reply_markup=user_menu)
+        await state.clear()
 
     @router.message(PaymentForm.waiting_amount)
     async def receive_amount(message: Message, state: FSMContext):
