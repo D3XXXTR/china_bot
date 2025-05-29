@@ -3,140 +3,142 @@ from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, Message,
     InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 )
+
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+import html
+from aiogram.fsm.state import State, StatesGroup
+
+
+class AdminState(StatesGroup):
+    waiting_amount = State()
+    wait_reply = State()
+    wait_delete_code = State()
+    search_code = State()
+
+
 
 admin_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="📋 Все заказы"), KeyboardButton(text="🗑 Удалить заказ")],
-        [KeyboardButton(text="🔍 Поиск по коду"), KeyboardButton(text="🔁 Изменить статус")],
-        [KeyboardButton(text="✅ Отправленные"), KeyboardButton(text="🕐 В ожидании")],
-        [KeyboardButton(text="💰 Указать сумму"), KeyboardButton(text="📨 Оплаченные товары")]
+        [KeyboardButton(text="📋 Все заказы"), KeyboardButton(text="🔍 Поиск по коду")],
+        [KeyboardButton(text="🗂 Все чаты"), KeyboardButton(text="📨 Оплаченные товары")]
     ],
     resize_keyboard=True
 )
 
-class SearchActions(StatesGroup):
-    wait_code = State()
-
-class AdminActions(StatesGroup):
-    wait_delete_code = State()
-    wait_edit_status = State()
-    wait_amount = State()
-
-def register_admin_handlers(dp, conn, cursor, admin_id, bot):
+def register_admin_handlers(dp, conn, cursor, ADMIN_IDS, bot):
     router = Router()
 
     @router.message(F.text == "📋 Все заказы")
     async def show_all_orders(message: Message):
+
         cursor.execute("SELECT code, link, details, quantity, status, created_at, amount FROM orders ORDER BY id DESC LIMIT 10")
         rows = cursor.fetchall()
         if not rows:
             return await message.answer("Нет заказов.")
-        text = "📋 Последние заказы:\n\n"
+
         for row in rows:
-            text += (
-                f"# {row[0]}\n🔗 {row[1]}\n📌 {row[2]}\n🔢 {row[3]} шт\n"
-                f"📦 {row[4]}\n🕒 {row[5]}\n💰 Сумма: {row[6] or '—'} ₽\n\n"
+            code, link, details, quantity, status, created_at, amount = row
+            safe_link = html.escape(link) if link and link.startswith("http") else ""
+            product_link = f'<a href="{safe_link}">Товар</a>' if safe_link else "Товар"
+
+            text = (
+                f"# {code}\n🔗 {product_link}\n📌 {details}\n🔢 {quantity} шт\n"
+                f"📦 {status}\n🕒 {created_at}\n💰 Сумма: {amount or '—'} ₽\n"
             )
-        await message.answer(text)
+            buttons = None
+            if status != "✅ Отправлен":
+                buttons = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🚚 Отправлен", callback_data=f"mark_sent_{code}")],
+                    [InlineKeyboardButton(text="💰 Указать сумму", callback_data=f"setamount_{code}")]
+                ])
+
+            await message.answer(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=buttons)
+
+    @router.callback_query(F.data.startswith("setamount_"))
+    async def ask_amount(callback: CallbackQuery, state: FSMContext):
+        code = callback.data.replace("setamount_", "")
+        await state.set_state(AdminState.waiting_amount)
+        await state.update_data(code=code)
+        await callback.message.answer(f"💰 Введите сумму для заказа #{code}:")
+
+    @router.callback_query(F.data.startswith("mark_sent_"))
+    async def mark_order_sent(callback: CallbackQuery):
+        code = callback.data.replace("mark_sent_", "")
+        cursor.execute("UPDATE orders SET status = '✅ Отправлен' WHERE code = ?", (code,))
+        conn.commit()
+        await callback.message.edit_reply_markup()
+        await callback.answer("📦 Статус обновлён")
+        await callback.message.answer(f"✅ Заказ #{code} отмечен как отправленный.")
+        cursor.execute("SELECT user_id FROM orders WHERE code = ?", (code,))
+        user = cursor.fetchone()
+        if user:
+            await bot.send_message(user[0], f"🚚 Ваш заказ #{code} был отправлен! Ожидайте доставку в Симферополь.")
 
     @router.message(F.text == "🔍 Поиск по коду")
     async def search_by_code_prompt(message: Message, state: FSMContext):
         await message.answer("Введите: [код заказа] ")
-        await state.set_state(SearchActions.wait_code)
+        await state.set_state(State("search_code"))
 
-    @router.message(SearchActions.wait_code)
+    @router.message(State("search_code"))
     async def search_by_code(message: Message, state: FSMContext):
         code = message.text.strip()
-        cursor.execute("SELECT link, details, quantity, status FROM orders WHERE code = ?", (code,))
+        cursor.execute("SELECT link, details, quantity, status, created_at, amount FROM orders WHERE code = ?", (code,))
         result = cursor.fetchone()
         if result:
+            link, details, quantity, status, created_at, amount = result
+            safe_link = html.escape(link) if link and link.startswith("http") else ""
+            product_link = f'<a href="{safe_link}">Товар</a>' if safe_link else "Товар"
             await message.answer(
-                f"# {code}\n🔗 {result[0]}\n📌 {result[1]}\n🔢 {result[2]} шт\n📦 Статус: {result[3]}"
+                f"# {code}\n"
+                f"🔗 {product_link}\n"
+                f"📌 {details}\n"
+                f"🔢 {quantity} шт\n"
+                f"📦 Статус: {status}\n"
+                f"🕒 {created_at}\n"
+                f"💰 Сумма: {amount or '—'} ₽",
+                parse_mode="HTML",
+                disable_web_page_preview=True
             )
         else:
             await message.answer("❗ Заказ не найден.")
         await state.clear()
 
-    @router.message(F.text == "✅ Отправленные")
-    async def show_sent_orders(message: Message):
-        cursor.execute("SELECT code, link, details, quantity, status FROM orders WHERE status = '✅ Отправлен'")
-        rows = cursor.fetchall()
-        if not rows:
-            return await message.answer("Нет отправленных заказов.")
-        text = "✅ Отправленные заказы:\n\n"
-        for row in rows:
-            text += (
-                f"# {row[0]}\n🔗 {row[1]}\n📌 {row[2]}\n🔢 {row[3]} шт\n📦 {row[4]}\n\n"
-            )
-        await message.answer(text)
 
-    @router.message(F.text == "🕐 В ожидании")
-    async def show_pending_orders(message: Message):
-        cursor.execute("SELECT code, link, details, quantity, status FROM orders WHERE status = '🕐 В ожидании'")
-        rows = cursor.fetchall()
-        if not rows:
-            return await message.answer("Нет заказов в ожидании.")
-        text = "🕐 Заказы в ожидании:\n\n"
-        for row in rows:
-            text += (
-                f"# {row[0]}\n🔗 {row[1]}\n📌 {row[2]}\n🔢 {row[3]} шт\n📦 {row[4]}\n\n"
-            )
-        await message.answer(text)
-
-    @router.message(F.text == "💰 Указать сумму")
-    async def ask_amount(message: Message, state: FSMContext):
-        await message.answer("Введите код и сумму (например: 1234 1490.50):")
-        await state.set_state(AdminActions.wait_amount)
-
-    @router.message(AdminActions.wait_amount)
+    @router.message(AdminState.waiting_amount)
     async def set_amount(message: Message, state: FSMContext):
         try:
-            code, amount = message.text.strip().split(" ", 1)
-            cursor.execute("UPDATE orders SET amount = ? WHERE code = ?", (amount, code))
+            amount = ''.join(c for c in message.text if c.isdigit() or c == '.').strip()
+            data = await state.get_data()
+            code = data.get("code")
+
+            if not code:
+                return await message.answer("❗ Ошибка: код заказа не найден в состоянии.")
+
+            cursor.execute("UPDATE orders SET amount = ?, status = 'Ожидает оплаты' WHERE code = ?", (amount, code))
             conn.commit()
+
             cursor.execute("SELECT user_id FROM orders WHERE code = ?", (code,))
             user = cursor.fetchone()
             if user:
                 user_id = user[0]
-                await bot.send_message(user_id,
-                   f"💰 Сумма к оплате (за все заказы): <b>{amount} ₽</b>\n"
-                   "💳 Переведите на карту (ВТБ банк):\n<code>89780520940</code>\nУМЕРОВА Э.И.\n\n"
-                   "📸 После оплаты отправьте чек в ответ на это сообщение.",
-                    parse_mode="HTML"
+                await bot.send_message(
+                    user_id,
+                    f"📌 Заказ #{code} обновлён. Сумма к оплате: {amount} ₽.\nПерейдите в '📦 Мои заказы', чтобы оплатить."
                 )
+
             await message.answer(f"✅ Сумма {amount} ₽ для заказа #{code} отправлена пользователю.")
-        except:
-            await message.answer("❗ Неверный формат. Введите: код сумма (например: 1234 1490.50)")
-        await state.clear()
-
-    @router.message(F.text == "🔁 Изменить статус")
-    async def ask_status_update(message: Message, state: FSMContext):
-        await message.answer("Введите код и новый статус (пример: 1234 ✅ Отправлен):")
-        await state.set_state(AdminActions.wait_edit_status)
-
-    @router.message(AdminActions.wait_edit_status)
-    async def update_status(message: Message, state: FSMContext):
-        try:
-            code, status = message.text.strip().split(" ", 1)
-            cursor.execute("UPDATE orders SET status = ? WHERE code = ?", (status, code))
-            conn.commit()
-            cursor.execute("SELECT user_id FROM orders WHERE code = ?", (code,))
-            user = cursor.fetchone()
-            if user:
-                await bot.send_message(user[0], f"🔔 Статус заказа #{code} обновлён: {status}")
-            await message.answer(f"✅ Статус заказа #{code} обновлён.")
-        except:
-            await message.answer("❗ Формат: 1234 ✅ Отправлен")
+        except Exception as e:
+            print("Ошибка при установке суммы:", e)
+            await message.answer("❗ Неверный формат. Просто введите сумму числом (например: 1490.50)")
         await state.clear()
 
     @router.message(F.text == "🗑 Удалить заказ")
     async def ask_delete(message: Message, state: FSMContext):
         await message.answer("Введите код заказа для удаления:")
-        await state.set_state(AdminActions.wait_delete_code)
+        await state.set_state(State("wait_delete_code"))
 
-    @router.message(AdminActions.wait_delete_code)
+    @router.message(State("wait_delete_code"))
     async def delete_order(message: Message, state: FSMContext):
         code = message.text.strip()
         cursor.execute("DELETE FROM orders WHERE code = ?", (code,))
@@ -146,7 +148,7 @@ def register_admin_handlers(dp, conn, cursor, admin_id, bot):
 
     @router.message(F.text == "📨 Оплаченные товары")
     async def show_uploaded_checks(message: Message):
-        cursor.execute("SELECT code, user_id, check_file_id FROM orders WHERE check_file_id IS NOT NULL ORDER BY id DESC LIMIT 10")
+        cursor.execute("SELECT code, user_id, check_file_id FROM orders WHERE check_file_id IS NOT NULL AND status = '🕓 Ожидает подтверждения' ORDER BY id DESC LIMIT 10")
         rows = cursor.fetchall()
         if not rows:
             return await message.answer("Нет загруженных чеков.")
@@ -172,5 +174,41 @@ def register_admin_handlers(dp, conn, cursor, admin_id, bot):
         if user:
             await bot.send_message(user[0], f"✅ Ваш заказ #{code} подтверждён и оплачен.")
 
-    dp.include_router(router)
+    @router.message(F.text == "🗂 Все чаты")
+    async def show_all_chats(message: Message):
+        cursor.execute("SELECT user_id, MAX(id) as last_id FROM support_messages GROUP BY user_id ORDER BY last_id DESC")
+        users = cursor.fetchall()
+        if not users:
+            return await message.answer("Нет чатов с пользователями.")
+        for user_id, _ in users:
+            cursor.execute("SELECT details, code FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,))
+            row = cursor.fetchone()
+            summary = f"🧾 Последний заказ: {row[0]}" if row else ""
+            buttons = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💬 Ответить", callback_data=f"reply_{user_id}")]
+            ])
+            await message.answer(f"👤 Пользователь ID: <code>{user_id}</code> {summary}", reply_markup=buttons, parse_mode="HTML")
 
+    @router.callback_query(F.data.startswith("reply_"))
+    async def start_reply(callback: CallbackQuery, state: FSMContext):
+        user_id = callback.data.replace("reply_", "")
+        await state.set_state(State("wait_reply"))
+        await state.update_data(reply_user_id=user_id)
+        await callback.message.answer(f"✍️ Напишите ответ для пользователя ID {user_id}")
+        await callback.answer()
+
+    @router.message(State("wait_reply"))
+    async def send_admin_reply(message: Message, state: FSMContext):
+        data = await state.get_data()
+        user_id = data.get("reply_user_id")
+        if user_id:
+            try:
+                await bot.send_message(int(user_id), f"📬 Ответ от поддержки: {message.text}")
+                await message.answer("✅ Ответ отправлен пользователю.")
+            except Exception:
+                await message.answer("❗ Не удалось отправить сообщение. Возможно, пользователь заблокировал бота.")
+        else:
+            await message.answer("❗ Не удалось найти ID пользователя.")
+        await state.clear()
+
+    dp.include_router(router)
