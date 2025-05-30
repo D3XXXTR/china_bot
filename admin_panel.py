@@ -32,7 +32,7 @@ def register_admin_handlers(dp, conn, cursor, ADMIN_IDS, bot):
     @router.message(F.text == "📋 Все заказы")
     async def show_all_orders(message: Message):
 
-        cursor.execute("SELECT code, link, details, quantity, status, created_at, amount FROM orders ORDER BY id DESC LIMIT 10")
+        cursor.execute("SELECT code, link, details, quantity, status, created_at, amount FROM orders ORDER BY id ASC")
         rows = cursor.fetchall()
         if not rows:
             return await message.answer("Нет заказов.")
@@ -46,14 +46,38 @@ def register_admin_handlers(dp, conn, cursor, ADMIN_IDS, bot):
                 f"# {code}\n🔗 {product_link}\n📌 {details}\n🔢 {quantity} шт\n"
                 f"📦 {status}\n🕒 {created_at}\n💰 Сумма: {amount or '—'} ₽\n"
             )
-            buttons = None
-            if status != "✅ Отправлен":
-                buttons = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🚚 Отправлен", callback_data=f"mark_sent_{code}")],
-                    [InlineKeyboardButton(text="💰 Указать сумму", callback_data=f"setamount_{code}")]
-                ])
+            keyboard = [[InlineKeyboardButton(text="🗑 Удалить", callback_data=f"admin_delete_{code}")]]
+
+            if status in ["🕐 В ожидании", "В ожидании"]:
+                keyboard.insert(0, [InlineKeyboardButton(text="💰 Указать сумму", callback_data=f"setamount_{code}")])
+            if amount and status not in ["✅ Отправлен", "Можно забирать"]:
+                keyboard.insert(0, [InlineKeyboardButton(text="🚚 Отправлен", callback_data=f"mark_sent_{code}")])
+            if status == "✅ Отправлен":
+                keyboard.insert(0, [InlineKeyboardButton(text="📦 Можно забирать", callback_data=f"ready_{code}")])
+
+            buttons = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
             await message.answer(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=buttons)
+
+    @router.callback_query(F.data.startswith("ready_"))
+    async def mark_ready(callback: CallbackQuery):
+        code = callback.data.replace("ready_", "")
+        cursor.execute("UPDATE orders SET status = 'Можно забирать' WHERE code = ?", (code,))
+        conn.commit()
+        await callback.message.edit_reply_markup()
+        await callback.answer("📦 Статус обновлён на 'Можно забирать'")
+        cursor.execute("SELECT user_id FROM orders WHERE code = ?", (code,))
+        user = cursor.fetchone()
+        if user:
+            await bot.send_message(user[0], f"📦 Ваш заказ #{code} можно забирать!")
+
+    @router.callback_query(F.data.startswith("admin_delete_"))
+    async def admin_delete_order(callback: CallbackQuery):
+        code = callback.data.replace("admin_delete_", "")
+        cursor.execute("DELETE FROM orders WHERE code = ?", (code,))
+        conn.commit()
+        await callback.message.edit_text(f"🗑 Заказ #{code} удалён.")
+        await callback.answer("Удалено")
 
     @router.callback_query(F.data.startswith("setamount_"))
     async def ask_amount(callback: CallbackQuery, state: FSMContext):

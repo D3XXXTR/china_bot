@@ -6,6 +6,7 @@ from datetime import datetime
 import random
 from dotenv import load_dotenv
 import os
+import re
 load_dotenv()
 
 user_menu = ReplyKeyboardMarkup(
@@ -54,13 +55,13 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
                 code, link, details, quantity, status, created_at, amount = row
                 product_link = f'<a href="{link}">Товар {i}</a>' if link.startswith("http") else f"Товар {i}"
 
-
-
-                if status == "Оплачен":
+                if status in ["🕐 В ожидании", "В ожидании"]:
+                    status_display = "🕐 В ожидании"
+                elif status in ["Ожидает оплаты"]:
+                    status_display = "💰 Ожидает оплаты"
+                elif status in ["Оплачен", "💳 Оплачен"]:
                     status_display = "💳 Оплачен"
-                elif status == "В ожидании":
-                    status_display = "🟠 В ожидании"
-                elif status == "Отправлен":
+                elif status in ["Отправлен", "✅ Отправлен"]:
                     status_display = "🚚 Отправлен"
                 else:
                     status_display = status
@@ -77,6 +78,10 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
                 if status == "Ожидает оплаты" and amount:
                     buttons = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay_{code}")]
+                    ])
+                elif status == "Можно забирать":
+                    buttons = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🚗 Доставка", url="https://t.me/kitaychik_shop")]
                     ])
                 elif status not in ["Оплачен", "Отправлен", "💳 Оплачен", "✅ Отправлен", "🕓 Ожидает подтверждения",
                                     "Ожидает оплаты"]:
@@ -121,11 +126,23 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
             "📸 После оплаты отправьте чек в ответ на это сообщение.",
             parse_mode="HTML"
         )
+
     @router.message(OrderForm.link)
     async def get_link(message: Message, state: FSMContext):
-        await state.update_data(link=message.text)
+        import re
+        text = message.text.strip()
+        match = re.search(r'https?://\S+', text)
+        link = match.group(0) if match else ""
+
+        if not link:
+            return await message.answer(
+                "❗ Не удалось определить ссылку. Пожалуйста, отправьте корректную ссылку на товар.")
+
+        await state.update_data(link=link)
         await state.set_state(OrderForm.details)
-        await message.answer("📌 Укажите параметры если они есть(через пробел, цвет, размер и т.д.) иначе отправьте слово 'нет' "":", reply_markup=user_menu)
+        await message.answer(
+            "📌 Укажите параметры если они есть (через пробел, цвет, размер и т.д.) иначе отправьте слово 'Нет':",
+            reply_markup=user_menu)
 
     @router.message(OrderForm.details)
     async def get_details(message: Message, state: FSMContext):
