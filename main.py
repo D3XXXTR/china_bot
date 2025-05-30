@@ -1,5 +1,3 @@
-# main.py
-
 import asyncio
 import sqlite3
 
@@ -16,7 +14,6 @@ import os
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-# Получаем строку и превращаем в список целых чисел
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 
 
@@ -26,7 +23,7 @@ dp = Dispatcher(storage=MemoryStorage())
 conn = sqlite3.connect("orders.db")
 cursor = conn.cursor()
 
-# Создание таблиц
+
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

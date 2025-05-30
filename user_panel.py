@@ -1,4 +1,3 @@
-# user_panel.py
 from aiogram import F, Router, types, Bot
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -55,7 +54,7 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
                 code, link, details, quantity, status, created_at, amount = row
                 product_link = f'<a href="{link}">Товар {i}</a>' if link.startswith("http") else f"Товар {i}"
 
-                # Эмодзи к статусу
+
 
                 if status == "Оплачен":
                     status_display = "💳 Оплачен"
