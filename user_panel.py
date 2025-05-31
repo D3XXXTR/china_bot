@@ -254,12 +254,18 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
     async def forward_user_reply(message: Message, state: FSMContext):
         data = await state.get_data()
         admin_id = data.get("active_admin_id")
+        user = message.from_user
+        username = f"@{user.username}" if user.username else "—"
+        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+        user_link = f'<a href="tg://user?id={user.id}">{full_name or username}</a>'
 
         text = (
-            f"💬 Ответ от пользователя\n"
-            f"👤 @{message.from_user.username or '—'} (id: <code>{message.from_user.id}</code>)\n\n"
+            f"💬 Сообщение от {user_link}\n"
+            f"🆔 ID: <code>{user.id}</code>\n"
+            f"🔗 Юзернейм: {username}\n\n"
             f"{message.text}"
         )
+
         buttons = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💬 Ответить", callback_data=f"reply_{message.from_user.id}")]
         ])
@@ -279,9 +285,18 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
         cursor.execute("INSERT INTO support_messages (user_id, sender, message, timestamp) VALUES (?, ?, ?, ?)",
                        (message.from_user.id, "user", message.text, now))
         conn.commit()
+        user = message.from_user
+        username = f"@{user.username}" if user.username else "—"
+        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+        user_link = f'<a href="tg://user?id={user.id}">{full_name or username}</a>'
+
         text = (
-            f"👤 Пользователь: @{message.from_user.username or '—'} (id: <code>{message.from_user.id}</code>)"
-            f"💬 Сообщение:{message.text}")
+            f"💬 Сообщение от {user_link}\n"
+            f"🆔 ID: <code>{user.id}</code>\n"
+            f"🔗 Юзернейм: {username}\n\n"
+            f"{message.text}"
+        )
+
         buttons = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💬 Ответить", callback_data=f"reply_{message.from_user.id}")]])
         for admin_id in ADMIN_IDS:
             await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
