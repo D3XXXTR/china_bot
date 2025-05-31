@@ -32,20 +32,35 @@ def register_admin_handlers(dp, conn, cursor, ADMIN_IDS, bot):
     @router.message(F.text == "📋 Все заказы")
     async def show_all_orders(message: Message):
 
-        cursor.execute("SELECT code, link, details, quantity, status, created_at, amount FROM orders ORDER BY id ASC")
+        cursor.execute("SELECT code, link, details, quantity, status, created_at, amount, user_id FROM orders ORDER BY id ASC")
         rows = cursor.fetchall()
         if not rows:
             return await message.answer("Нет заказов.")
 
         for row in rows:
-            code, link, details, quantity, status, created_at, amount = row
+            code, link, details, quantity, status, created_at, amount, row_user_id = row
             safe_link = html.escape(link) if link and link.startswith("http") else ""
             product_link = f'<a href="{safe_link}">Товар</a>' if safe_link else "Товар"
 
+            # Получаем имя пользователя через get_chat
+            try:
+                user = await bot.get_chat(row_user_id)  # row_user_id нужно будет получить из запроса
+                full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+                user_link = f'<a href="tg://user?id={user.id}">{full_name or user.id}</a>'
+            except Exception:
+                user_link = f"<code>{row_user_id}</code>"
+
             text = (
-                f"# {code}\n🔗 {product_link}\n📌 {details}\n🔢 {quantity} шт\n"
-                f"📦 {status}\n🕒 {created_at}\n💰 Сумма: {amount or '—'} ₽\n"
+                f"# {code}\n"
+                f"👤 Пользователь: {user_link}\n"
+                f"🔗 {product_link}\n"
+                f"📌 {details}\n"
+                f"🔢 {quantity} шт\n"
+                f"📦 {status}\n"
+                f"🕒 {created_at}\n"
+                f"💰 Сумма: {amount or '—'} ₽\n"
             )
+
             keyboard = [[InlineKeyboardButton(text="🗑 Удалить", callback_data=f"admin_delete_{code}")]]
 
             if status in ["🕐 В ожидании", "В ожидании"]:
