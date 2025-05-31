@@ -254,15 +254,20 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
     async def forward_user_reply(message: Message, state: FSMContext):
         data = await state.get_data()
         admin_id = data.get("active_admin_id")
+
         user = message.from_user
-        username = f"@{user.username}" if user.username else "—"
         full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-        user_link = f'<a href="tg://user?id={user.id}">{full_name or username}</a>'
+        user_link = f'<a href="tg://user?id={user.id}">{full_name or "Пользователь"}</a>'
+
+        # Получаем код последнего заказа
+        cursor.execute("SELECT code FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user.id,))
+        order = cursor.fetchone()
+        last_order_code = f"#{order[0]}" if order else "—"
 
         text = (
             f"💬 Сообщение от {user_link}\n"
             f"🆔 ID: <code>{user.id}</code>\n"
-            f"🔗 Юзернейм: {username}\n\n"
+            f"📦 Код последнего заказа: {last_order_code}\n\n"
             f"{message.text}"
         )
 
@@ -274,7 +279,10 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
             await bot.send_message(admin_id, text, reply_markup=buttons, parse_mode="HTML")
         else:
             for admin_id in ADMIN_IDS:
-                await bot.send_message(admin_id, text, reply_markup=buttons, parse_mode="HTML")
+                try:
+                    await bot.send_message(admin_id, text, reply_markup=buttons, parse_mode="HTML")
+                except Exception as e:
+                    print(f"❗ Не удалось отправить сообщение админу {admin_id}: {e}")
 
         await message.answer("✅ Сообщение отправлено в поддержку. Ожидайте ответ.", reply_markup=user_menu)
 
@@ -282,24 +290,44 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
     async def handle_support_message(message: Message, state: FSMContext):
         await state.clear()
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        cursor.execute("INSERT INTO support_messages (user_id, sender, message, timestamp) VALUES (?, ?, ?, ?)",
-                       (message.from_user.id, "user", message.text, now))
-        conn.commit()
-        user = message.from_user
-        username = f"@{user.username}" if user.username else "—"
-        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-        user_link = f'<a href="tg://user?id={user.id}">{full_name or username}</a>'
 
+        # Сохраняем сообщение в историю
+        cursor.execute(
+            "INSERT INTO support_messages (user_id, sender, message, timestamp) VALUES (?, ?, ?, ?)",
+            (message.from_user.id, "user", message.text, now)
+        )
+        conn.commit()
+
+        # Формируем информацию о пользователе
+        user = message.from_user
+        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+        user_link = f'<a href="tg://user?id={user.id}">{full_name or "Пользователь"}</a>'
+
+        # Получаем последний заказ
+        cursor.execute("SELECT code FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user.id,))
+        order = cursor.fetchone()
+        last_order_code = f"#{order[0]}" if order else "—"
+
+        # Формируем текст сообщения админу
         text = (
             f"💬 Сообщение от {user_link}\n"
             f"🆔 ID: <code>{user.id}</code>\n"
-            f"🔗 Юзернейм: {username}\n\n"
+            f"📦 Код последнего заказа: {last_order_code}\n\n"
             f"{message.text}"
         )
 
-        buttons = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💬 Ответить", callback_data=f"reply_{message.from_user.id}")]])
+        # Кнопка "Ответить"
+        buttons = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Ответить", callback_data=f"reply_{user.id}")]
+        ])
+
+        # Рассылаем всем админам
         for admin_id in ADMIN_IDS:
-            await bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=buttons)
+            try:
+                await bot.send_message(admin_id, text, reply_markup=buttons, parse_mode="HTML")
+            except Exception as e:
+                print(f"❗ Не удалось отправить сообщение админу {admin_id}: {e}")
+
         await message.answer("✅ Ваше сообщение отправлено. Ожидайте ответа.", reply_markup=user_menu)
 
     dp.include_router(router)

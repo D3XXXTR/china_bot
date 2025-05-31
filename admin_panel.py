@@ -234,10 +234,8 @@ def register_admin_handlers(dp, conn, cursor, ADMIN_IDS, bot):
             text = (
                 f"👤 Пользователь: {user_link}\n"
                 f"🆔 ID: <code>{user_id}</code>\n"
-                f"🔗 Username: {username}\n"
-                f"{summary}"
+                f"📦 Код последнего заказа: #{row[1]}" if row else ""
             )
-
             await message.answer(text, reply_markup=buttons, parse_mode="HTML")
 
     @router.callback_query(F.data.startswith("deletechat_"))
