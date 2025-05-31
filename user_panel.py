@@ -31,6 +31,7 @@ class PaymentForm(StatesGroup):
 
 class SupportForm(StatesGroup):
     waiting_message = State()
+    active_chat = State()
 
 def generate_order_code():
     return f"{random.randint(1000, 9999)}"
@@ -231,6 +232,45 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
         cursor.execute("DELETE FROM orders WHERE code = ? AND user_id = ?", (code, callback.from_user.id))
         conn.commit()
         await callback.message.answer(f"🗑 Заказ #{code} удалён.")
+
+    @router.callback_query(F.data.startswith("user_reply_"))
+    async def user_reply_callback(callback: types.CallbackQuery, state: FSMContext):
+        await state.clear()
+        admin_id = int(callback.data.replace("user_reply_", ""))
+        await state.update_data(active_admin_id=admin_id)
+        await state.set_state(SupportForm.active_chat)
+        await callback.message.answer("✍️ Напишите сообщение для поддержки. Мы ответим вам как можно скорее.",
+                                      reply_markup=user_menu)
+
+    @router.callback_query(F.data.startswith("reply_"))
+    async def start_user_reply(callback: types.CallbackQuery, state: FSMContext):
+        await state.clear()
+        admin_id = int(callback.data.replace("reply_", ""))
+        await state.update_data(active_admin_id=admin_id)
+        await state.set_state(SupportForm.active_chat)
+        await callback.message.answer("✍️ Напишите ответ для поддержки:", reply_markup=user_menu)
+
+    @router.message(SupportForm.active_chat)
+    async def forward_user_reply(message: Message, state: FSMContext):
+        data = await state.get_data()
+        admin_id = data.get("active_admin_id")
+
+        text = (
+            f"💬 Ответ от пользователя\n"
+            f"👤 @{message.from_user.username or '—'} (id: <code>{message.from_user.id}</code>)\n\n"
+            f"{message.text}"
+        )
+        buttons = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Ответить", callback_data=f"reply_{message.from_user.id}")]
+        ])
+
+        if admin_id:
+            await bot.send_message(admin_id, text, reply_markup=buttons, parse_mode="HTML")
+        else:
+            for admin_id in ADMIN_IDS:
+                await bot.send_message(admin_id, text, reply_markup=buttons, parse_mode="HTML")
+
+        await message.answer("✅ Сообщение отправлено в поддержку. Ожидайте ответ.", reply_markup=user_menu)
 
     @router.message(SupportForm.waiting_message)
     async def handle_support_message(message: Message, state: FSMContext):

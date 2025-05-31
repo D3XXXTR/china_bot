@@ -102,9 +102,9 @@ def register_admin_handlers(dp, conn, cursor, ADMIN_IDS, bot):
     @router.message(F.text == "🔍 Поиск по коду")
     async def search_by_code_prompt(message: Message, state: FSMContext):
         await message.answer("Введите: [код заказа] ")
-        await state.set_state(State("search_code"))
+        await state.set_state(AdminState.search_code)
 
-    @router.message(State("search_code"))
+    @router.message(AdminState.search_code)
     async def search_by_code(message: Message, state: FSMContext):
         code = message.text.strip()
         cursor.execute("SELECT link, details, quantity, status, created_at, amount FROM orders WHERE code = ?", (code,))
@@ -160,9 +160,9 @@ def register_admin_handlers(dp, conn, cursor, ADMIN_IDS, bot):
     @router.message(F.text == "🗑 Удалить заказ")
     async def ask_delete(message: Message, state: FSMContext):
         await message.answer("Введите код заказа для удаления:")
-        await state.set_state(State("wait_delete_code"))
+        await state.set_state(AdminState.wait_delete_code)
 
-    @router.message(State("wait_delete_code"))
+    @router.message(AdminState.wait_delete_code)
     async def delete_order(message: Message, state: FSMContext):
         code = message.text.strip()
         cursor.execute("DELETE FROM orders WHERE code = ?", (code,))
@@ -215,22 +215,28 @@ def register_admin_handlers(dp, conn, cursor, ADMIN_IDS, bot):
 
     @router.callback_query(F.data.startswith("reply_"))
     async def start_reply(callback: CallbackQuery, state: FSMContext):
-        user_id = callback.data.replace("reply_", "")
-        await state.set_state(State("wait_reply"))
+        await state.clear()  # ← ВАЖНО: очистка предыдущего состояния
+        user_id = int(callback.data.replace("reply_", ""))
+        await state.set_state(AdminState.wait_reply)
         await state.update_data(reply_user_id=user_id)
         await callback.message.answer(f"✍️ Напишите ответ для пользователя ID {user_id}")
         await callback.answer()
 
-    @router.message(State("wait_reply"))
+    @router.message(AdminState.wait_reply)
     async def send_admin_reply(message: Message, state: FSMContext):
         data = await state.get_data()
         user_id = data.get("reply_user_id")
         if user_id:
             try:
-                await bot.send_message(int(user_id), f"📬 Ответ от поддержки: {message.text}")
+                buttons = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✉️ Ответить", callback_data=f"user_reply_{message.from_user.id}")]
+                ])
+                await bot.send_message(user_id, f"📬 Ответ от поддержки:\n\n{message.text}", reply_markup=buttons)
                 await message.answer("✅ Ответ отправлен пользователю.")
-            except Exception:
+            except Exception as e:
+                print(f"Ошибка при отправке сообщения пользователю {user_id}:", e)
                 await message.answer("❗ Не удалось отправить сообщение. Возможно, пользователь заблокировал бота.")
+
         else:
             await message.answer("❗ Не удалось найти ID пользователя.")
         await state.clear()
