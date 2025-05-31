@@ -12,7 +12,7 @@ load_dotenv()
 user_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📦 Мои заказы"), KeyboardButton(text="🛍 Оформить заказ")],
-        [KeyboardButton(text="📦 В наличии"), KeyboardButton(text="📞 Поддержка")],
+        [KeyboardButton(text="📦 В наличии"), KeyboardButton(text="💬 Чат")],
     ],
     resize_keyboard=True
 )
@@ -41,10 +41,10 @@ def register_user_handlers(dp, conn, cursor, bot, ADMIN_IDS):
 
 
     # Обработчики команд, заказов, оплаты, поддержки
-    @router.message(F.text.in_(["📦 Мои заказы", "📞 Поддержка", "📦 В наличии", "🛍 Оформить заказ"]))
+    @router.message(F.text.in_(["📦 Мои заказы", "💬 Чат", "📦 В наличии", "🛍 Оформить заказ"]))
     async def handle_main_menu_buttons(message: Message, state: FSMContext):
         await state.clear()
-        if message.text == "📞 Поддержка":
+        if message.text == "💬 Чат":
             await state.set_state(SupportForm.waiting_message)
             await message.answer("📩 Напишите Ваш вопрос. Мы ответим как можно скорее.", reply_markup=user_menu)
         elif message.text == "📦 Мои заказы":
