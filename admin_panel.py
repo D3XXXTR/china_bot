@@ -200,18 +200,53 @@ def register_admin_handlers(dp, conn, cursor, ADMIN_IDS, bot):
 
     @router.message(F.text == "🗂 Все чаты")
     async def show_all_chats(message: Message):
-        cursor.execute("SELECT user_id, MAX(id) as last_id FROM support_messages GROUP BY user_id ORDER BY last_id DESC")
+        cursor.execute(
+            "SELECT user_id, MAX(id) as last_id FROM support_messages GROUP BY user_id ORDER BY last_id DESC")
         users = cursor.fetchall()
         if not users:
             return await message.answer("Нет чатов с пользователями.")
+
         for user_id, _ in users:
+            # Пытаемся получить последнее сообщение или заказ
             cursor.execute("SELECT details, code FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,))
             row = cursor.fetchone()
-            summary = f"🧾 Последний заказ: {row[0]}" if row else ""
+            summary = f"🧾 Последний заказ: #{row[1]} — {row[0]}" if row else ""
+
+            # Получаем username и имя из метода get_chat
+            try:
+                user = await bot.get_chat(user_id)
+                username = f"@{user.username}" if user.username else "—"
+                full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+                user_link = f'<a href="tg://user?id={user.id}">{full_name or username}</a>'
+            except Exception as e:
+                print(f"Не удалось получить info о user_id={user_id}:", e)
+                username = "—"
+                full_name = "—"
+                user_link = f"ID: {user_id}"
+
             buttons = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💬 Ответить", callback_data=f"reply_{user_id}")]
+                [
+                    InlineKeyboardButton(text="💬 Ответить", callback_data=f"reply_{user_id}"),
+                    InlineKeyboardButton(text="🗑 Удалить чат", callback_data=f"deletechat_{user_id}")
+                ]
             ])
-            await message.answer(f"👤 Пользователь ID: <code>{user_id}</code> {summary}", reply_markup=buttons, parse_mode="HTML")
+
+            text = (
+                f"👤 Пользователь: {user_link}\n"
+                f"🆔 ID: <code>{user_id}</code>\n"
+                f"🔗 Username: {username}\n"
+                f"{summary}"
+            )
+
+            await message.answer(text, reply_markup=buttons, parse_mode="HTML")
+
+    @router.callback_query(F.data.startswith("deletechat_"))
+    async def delete_chat(callback: CallbackQuery):
+        user_id = int(callback.data.replace("deletechat_", ""))
+        cursor.execute("DELETE FROM support_messages WHERE user_id = ?", (user_id,))
+        conn.commit()
+        await callback.message.edit_text(f"🗑 Чат с пользователем  <code>{user_id}</code> удалён.", parse_mode="HTML")
+        await callback.answer()
 
     @router.callback_query(F.data.startswith("reply_"))
     async def start_reply(callback: CallbackQuery, state: FSMContext):
